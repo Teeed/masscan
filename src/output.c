@@ -155,6 +155,22 @@ normalize_string(const unsigned char *px, size_t length,
 
 
 /*****************************************************************************
+ * Flush output buffers.
+ *****************************************************************************/
+static void flush_output(FILE *fp)
+{
+retry_flush_output:
+    if (fflush(fp) != 0) {
+        if (errno == EAGAIN) {
+            goto retry_flush_output;
+        }
+        perror("output flush");
+        exit(1);
+    }
+}
+
+
+/*****************************************************************************
  * PORTABILITY: WINDOWS
  *
  * Windows POSIX functions open the file without the "share-delete" flag,
@@ -236,11 +252,19 @@ close_rotate(struct Output *out, FILE *fp)
     if (fp == NULL)
         return;
 
+
+    /*
+     * Write the format-specific headers, like <xml>
+     */
+    if (out->is_virgin_file) {
+        out->funcs->open(out, fp);
+        // flush forced below
+        out->is_virgin_file = 0;
+    }
     /*
      * Write the format-specific trailers, like </xml>
      */
-    if (!out->is_virgin_file)
-        out->funcs->close(out, fp);
+    out->funcs->close(out, fp);
 
     memset(&out->counts, 0, sizeof(out->counts));
 
@@ -248,7 +272,7 @@ close_rotate(struct Output *out, FILE *fp)
     if (out->format == Output_Redis)
         return;
 
-    fflush(fp);
+    flush_output(fp);
     fclose(fp);
 }
 
@@ -832,6 +856,7 @@ output_report_status(struct Output *out, time_t timestamp, int status,
      */
     if (out->is_virgin_file) {
         out->funcs->open(out, fp);
+        // flush forced below
         out->is_virgin_file = 0;
     }
 
@@ -840,6 +865,7 @@ output_report_status(struct Output *out, time_t timestamp, int status,
      * and so on.
      */
     out->funcs->status(out, fp, timestamp, status, ip, ip_proto, port, reason, ttl);
+    flush_output(fp);
 }
 
 
@@ -905,6 +931,7 @@ output_report_banner(struct Output *out, time_t now,
      */
     if (out->is_virgin_file) {
         out->funcs->open(out, fp);
+        // flush forced below
         out->is_virgin_file = 0;
     }
 
@@ -913,7 +940,7 @@ output_report_banner(struct Output *out, time_t now,
      * and so on.
      */
     out->funcs->banner(out, fp, now, ip, ip_proto, port, proto, ttl, px, length);
-
+    flush_output(fp);
 }
 
 
